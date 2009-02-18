@@ -1,7 +1,7 @@
 gem_spec = Gem::Specification.new do |s|
   s.name = "aws-sdb"
   s.rubyforge_project = s.name
-  s.version = "0.4.0"
+  s.version = "0.4.1"
   s.has_rdoc = false
   s.extra_rdoc_files = ["README", "LICENSE"]
   s.summary = "Amazon SDB API"
