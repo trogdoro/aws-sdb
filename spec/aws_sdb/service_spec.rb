@@ -9,14 +9,26 @@ require 'uuidtools'
 
 include AwsSdb
 
+# Setting this to false slows down the specs (by recreating the domain each
+# time) but makes things cleaner
+reuse_test_domain = true
+
+def uuid
+  UUID.random_create.to_s.gsub('-', '_')
+end
+
+def delete_test_domain
+  @domain = "test_#{uuid}"
+  domains = @service.list_domains[0]
+  domains.each do |d|
+    @service.delete_domain(d) if d =~ /^test/
+  end
+end
+
 describe Service, "when creating a new domain" do
   before(:all) do
     @service = AwsSdb::Service.new
-    @domain = "test-#{UUID.random_create.to_s}"
-    domains = @service.list_domains[0]
-    domains.each do |d|
-      @service.delete_domain(d) if d =~ /^test/
-    end
+    delete_test_domain
   end
 
   after(:all) do
@@ -25,12 +37,12 @@ describe Service, "when creating a new domain" do
 
   it "should not raise an error if a valid new domain name is given" do
     lambda {
-      @service.create_domain("test-#{UUID.random_create.to_s}")
+      @service.create_domain("test_#{uuid}")
     }.should_not raise_error
   end
 
   it "should not raise an error if the domain name already exists" do
-    domain = "test-#{UUID.random_create.to_s}"
+    domain = "test_#{uuid}"
     lambda {
       @service.create_domain(domain)
       @service.create_domain(domain)
@@ -72,10 +84,7 @@ end
 describe Service, "when listing domains" do
   before(:all) do
     @service = AwsSdb::Service.new
-    @domain = "test-#{UUID.random_create.to_s}"
-    @service.list_domains[0].each do |d|
-      @service.delete_domain(d) if d =~ /^test/
-    end
+    delete_test_domain
     @service.create_domain(@domain)
   end
 
@@ -95,10 +104,7 @@ end
 describe Service, "when deleting domains" do
   before(:all) do
     @service = AwsSdb::Service.new
-    @domain = "test-#{UUID.random_create.to_s}"
-    @service.list_domains[0].each do |d|
-      @service.delete_domain(d) if d =~ /^test/
-    end
+    delete_test_domain
     @service.create_domain(@domain)
   end
 
@@ -112,7 +118,7 @@ describe Service, "when deleting domains" do
 
   it "should not raise an error trying to delete a non-existing domain" do
     lambda {
-      @service.delete_domain(UUID.random_create.to_s)
+      @service.delete_domain(uuid)
     }.should_not raise_error
   end
 end
@@ -120,12 +126,15 @@ end
 describe Service, "when managing items" do
   before(:all) do
     @service = AwsSdb::Service.new
-    @domain = "test-#{UUID.random_create.to_s}"
-    @service.list_domains[0].each do |d|
-      @service.delete_domain(d) if d =~ /^test/
+    unless reuse_test_domain
+      delete_test_domain
+      @service.create_domain(@domain)
+      @item = "test_#{uuid}"
+    else
+      @domain = "test_service_spec"
+      @service.create_domain(@domain) unless @service.list_domains[0].member?(@domain)
+      @item = "test_foo"
     end
-    @service.create_domain(@domain)
-    @item = "test-#{UUID.random_create.to_s}"
     @attributes = {
       :question => 'What is the answer?',
       :answer => [ true, 'testing123', 4.2, 42, 420 ]
@@ -133,7 +142,7 @@ describe Service, "when managing items" do
   end
 
   after(:all) do
-     @service.delete_domain(@domain)
+    @service.delete_domain(@domain) unless reuse_test_domain
   end
 
   it "should be able to put attributes" do
@@ -156,6 +165,7 @@ describe Service, "when managing items" do
   end
 
   it "should be able to query" do
+    # NOTE: depends on the "should be able to put attributes" running before it
     result = nil
     lambda {
       result = @service.query(@domain, "[ 'answer' = '42' ]")[0]
@@ -166,12 +176,56 @@ describe Service, "when managing items" do
     result.include?(@item).should == true
   end
 
+  it "should be able to select" do
+    # NOTE: depends on the "should be able to put attributes" running before it
+    result = nil
+    lambda {
+      result = @service.select("select * from #{@domain} where answer = '42'")[0]
+    }.should_not raise_error
+    result.should_not be_nil
+    result.should_not be_empty
+    result.should_not be_nil
+
+    result[0]["Name"].should == @item
+  end
+
   it "should be able to query with attributes"
 
   it "should be able to delete attributes" do
     lambda {
       @service.delete_attributes(@domain, @item)
     }.should_not raise_error
+  end
+end
+
+
+# Unlike the above specs, these specs don't actually call SimpleDB
+
+describe Service, "#query" do
+  before(:all) do
+    @service = AwsSdb::Service.new
+    @service.stub! :call
+    @domain = 'foo'
+  end
+
+  it "should query" do
+    params = {"Action"=>"Query", "QueryExpression"=>"[ 'answer' = '42' ]", "DomainName"=>"foo"}
+    @service.should_receive(:call).with(:get, params).and_return(REXML::Document.new())
+    result = @service.query(@domain, "[ 'answer' = '42' ]")[0]
+    result.should == []
+  end
+end
+
+describe Service, "#select" do
+  before(:all) do
+    @service = AwsSdb::Service.new
+    @service.stub! :call
+  end
+
+  it "should select" do
+    params = {"Action"=>"Select", "SelectExpression"=>"select * from foo where Name = 'bar'"}
+    @service.should_receive(:call).with(:get, params).and_return(REXML::Document.new())
+    result = @service.select("select * from foo where Name = 'bar'")
   end
 end
 

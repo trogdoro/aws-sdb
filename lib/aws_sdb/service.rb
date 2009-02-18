@@ -144,6 +144,30 @@ module AwsSdb
       nil
     end
 
+    def select(select, token = nil)
+      params = {
+        'Action' => 'Select',
+        'SelectExpression' => select,
+      }
+      params['NextToken'] =
+        token unless token.nil? || token.empty?
+
+      doc = call(:get, params)
+      results = []
+      REXML::XPath.each(doc, "//Item") do |item|
+        name = REXML::XPath.first(item, './Name/text()').to_s
+
+        attributes = {'Name' => name}
+        REXML::XPath.each(item, "./Attribute") do |attr|
+          key = REXML::XPath.first(attr, './Name/text()').to_s
+          value = REXML::XPath.first(attr, './Value/text()').to_s
+          ( attributes[key] ||= [] ) << value
+        end
+        results << attributes
+      end
+      return results, REXML::XPath.first(doc, '//NextToken/text()').to_s
+    end
+
     protected
 
     def call(method, params)
